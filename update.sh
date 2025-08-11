@@ -888,6 +888,11 @@ update_orion() {
     echo "Orion 更新完毕。"
 }
 
+replace_build_by_signature() {
+    find "$BUILD_DIR/feeds" -type f -path "*/luci-static/*" -exec sed -i 's/build by ZqinKing/build by CoolLoong/g' {} +
+    find "$BUILD_DIR/package" -type f -path "*/luci-static/*" -exec sed -i 's/build by ZqinKing/build by CoolLoong/g' {} +
+}
+
 set_custom_banner() {
     local banner_path="$BUILD_DIR/package/base-files/files/etc/banner"
     mkdir -p "$(dirname "$banner_path")"
@@ -1072,6 +1077,7 @@ main() {
     install_mihomo_for_openclash
     set_ttyd_no_password
     set_default_hostname
+    replace_build_by_signature
     update_script_priority
 #    fix_easytier
 #    update_geoip
