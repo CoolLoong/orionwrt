@@ -135,9 +135,9 @@ echo "========================================="
 
 # 调用 update.sh 脚本，传递 --skip-feeds-update 参数
 if [[ "$SKIP_FEEDS_UPDATE" == "true" ]]; then
-    $BASE_PATH/update.sh "$REPO_URL" "$REPO_BRANCH" "$BASE_PATH/$BUILD_DIR" "$COMMIT_HASH" "$SKIP_FEEDS_UPDATE"
+    $BASE_PATH/update.sh "$REPO_URL" "$REPO_BRANCH" "$BASE_PATH/$BUILD_DIR" "$COMMIT_HASH" "$SKIP_FEEDS_UPDATE" "$Dev"
 else
-    $BASE_PATH/update.sh "$REPO_URL" "$REPO_BRANCH" "$BASE_PATH/$BUILD_DIR" "$COMMIT_HASH"
+    $BASE_PATH/update.sh "$REPO_URL" "$REPO_BRANCH" "$BASE_PATH/$BUILD_DIR" "$COMMIT_HASH" "" "$Dev"
 fi
 
 \cp -f "$CONFIG_FILE" "$BASE_PATH/$BUILD_DIR/.config"

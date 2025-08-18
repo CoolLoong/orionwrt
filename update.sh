@@ -19,6 +19,7 @@ REPO_BRANCH=$2
 BUILD_DIR=$3
 COMMIT_HASH=$4
 SKIP_FEEDS_UPDATE=$5
+DEVICE_NAME=$6
 
 FEEDS_CONF="feeds.conf.default"
 GOLANG_REPO="https://github.com/sbwml/packages_lang_golang"
@@ -94,7 +95,7 @@ remove_unwanted_packages() {
         "haproxy" "xray-core" "xray-plugin" "dns2socks" "alist" "hysteria"
         "mosdns" "adguardhome" "ddns-go" "naiveproxy" "shadowsocks-rust"
         "sing-box" "v2ray-core" "v2ray-geodata" "v2ray-plugin" "tuic-client"
-        "chinadns-ng" "ipt2socks" "tcping" "trojan-plus" "simple-obfs" "shadowsocksr-libev" 
+        "chinadns-ng" "ipt2socks" "tcping" "trojan-plus" "simple-obfs" "shadowsocksr-libev"
         "dae" "daed" "mihomo" "geoview" "tailscale" "open-app-filter" "msd_lite"
     )
     local packages_utils=(
@@ -102,7 +103,7 @@ remove_unwanted_packages() {
     )
     local small8_packages=(
         "ppp" "firewall" "dae" "daed" "daed-next" "libnftnl" "nftables" "dnsmasq" "luci-app-alist"
-        "alist" "opkg" "smartdns" "luci-app-smartdns"
+        "alist" "opkg" "smartdns" "luci-app-smartdns" "luci-app-openclash" "openclash"
     )
 
     for pkg in "${luci_packages[@]}"; do
@@ -914,32 +915,29 @@ EOF
 
 install_mihomo_for_openclash() {
     local mihomo_ver="v1.19.12"
-    local arch="linux-amd64-v3"
-    local mihomo_url="https://github.com/MetaCubeX/mihomo/releases/download/${mihomo_ver}/mihomo-${arch}-${mihomo_ver}.gz"
+    local device_name="$1"
+
+    local target_arch=""
+    if [[ $device_name =~ ^x64.* ]]; then
+        target_arch="linux-amd64-v3"
+    elif [[ $device_name =~ ^x86.* ]]; then
+        target_arch="linux-386"
+    elif [[ $device_name =~ ^(ax6000|ax3600|r4a|r619ac|ax1800|ax6|redmiax6s|qualcomm|ipq|filogic).* ]]; then
+        target_arch="linux-arm64"
+    elif [[ $device_name =~ ^(armv7|armv6|arm).* ]]; then
+        target_arch="linux-armv7"
+    else
+        target_arch="linux-arm64"
+        echo "⚠️ 未能识别设备架构 ($device_name)，默认使用 linux-arm64"
+    fi
+
+    local mihomo_url="https://github.com/MetaCubeX/mihomo/releases/download/${mihomo_ver}/mihomo-${target_arch}-${mihomo_ver}.gz"
     local temp_dir=$(mktemp -d)
     local mihomo_gz="$temp_dir/mihomo.gz"
     local mihomo_bin="$temp_dir/mihomo"
-    local openclash_dirs=(
-        "$BUILD_DIR/package/luci-app-openclash"
-        "$BUILD_DIR/feeds/small8/luci-app-openclash"
-    )
-    local openclash_found=false
-    local clash_core_dir=""
-    for dir in "${openclash_dirs[@]}"; do
-        if [ -d "$dir" ]; then
-            clash_core_dir="$dir/root/etc/openclash/core"
-            openclash_found=true
-            echo "找到 OpenClash 目录: $dir"
-            break
-        fi
-    done
-    if [ "$openclash_found" = false ]; then
-        echo "⚠️ OpenClash 目录不存在，跳过 mihomo 下载"
-        rm -rf "$temp_dir"
-        return 1
-    fi
+    local clash_core_dir="$BUILD_DIR/package/feeds/luci/luci-app-openclash/root/etc/openclash/core"
     mkdir -p "$clash_core_dir"
-    echo "正在下载 mihomo ($arch): $mihomo_url"
+    echo "正在下载 mihomo ($target_arch): $mihomo_url"
     if command -v wget >/dev/null 2>&1; then
         wget --tries=3 --timeout=30 --progress=bar -O "$mihomo_gz" "$mihomo_url"
     elif command -v curl >/dev/null 2>&1; then
@@ -949,45 +947,50 @@ install_mihomo_for_openclash() {
         rm -rf "$temp_dir"
         return 1
     fi
+
     if [ $? -ne 0 ] || [ ! -s "$mihomo_gz" ]; then
         echo "❌ 下载失败！请检查网络或链接: $mihomo_url"
         rm -rf "$temp_dir"
         return 1
     fi
+
     gunzip -c "$mihomo_gz" > "$mihomo_bin"
     if [ $? -ne 0 ] || [ ! -f "$mihomo_bin" ]; then
         echo "❌ 解压失败！"
         rm -rf "$temp_dir"
         return 1
     fi
+
     chmod +x "$mihomo_bin"
-    cp "$mihomo_bin" "$clash_core_dir/mihomo"
-    chmod +x "$clash_core_dir/mihomo"
-    ln -sf mihomo "$clash_core_dir/clash_meta"
-    echo "✅ mihomo 内核已安装到: $clash_core_dir"
+    cp "$mihomo_bin" "$clash_core_dir/clash"
+    chmod +x "$clash_core_dir/clash"
+    echo "✅ mihomo 内核 ($target_arch) 已安装到: $clash_core_dir"
     rm -rf "$temp_dir"
 }
 
 set_ttyd_no_password() {
     local ttyd_conf="$BUILD_DIR/feeds/packages/utils/ttyd/files/ttyd.config"
     local uci_defaults_path="$BUILD_DIR/package/base-files/files/etc/uci-defaults/99_ttyd_config"
+    local menu_path="$BUILD_DIR/feeds/luci/applications/luci-app-ttyd/root/usr/share/luci/menu.d/luci-app-ttyd.json"
+
     if [ ! -f "$ttyd_conf" ]; then
         echo "⚠️ ttyd 配置文件不存在: $ttyd_conf"
         echo "跳过 ttyd 配置"
         return 1
     fi
-    echo "找到 ttyd 配置文件: $ttyd_conf"
+    local ttyd_already_configured=false
     if grep -q "option login '0'" "$ttyd_conf" && grep -q "option enable '1'" "$ttyd_conf"; then
-        echo "✅ ttyd 已经配置过免密码登录，跳过重复配置"
-        return 0
+        echo "✅ ttyd 已经配置过免密码登录，跳过配置文件更新"
+        ttyd_already_configured=true
     fi
-    if [ ! -f "$ttyd_conf.bak" ]; then
-        cp "$ttyd_conf" "$ttyd_conf.bak"
-        echo "已备份原配置文件: $ttyd_conf.bak"
-    fi
-    local existing_content
-    existing_content=$(cat "$ttyd_conf")
-    cat > "$ttyd_conf" <<'EOF'
+    if [ "$ttyd_already_configured" = false ]; then
+        if [ ! -f "$ttyd_conf.bak" ]; then
+            cp "$ttyd_conf" "$ttyd_conf.bak"
+            echo "已备份原配置文件: $ttyd_conf.bak"
+        fi
+        local existing_content
+        existing_content=$(cat "$ttyd_conf")
+        cat > "$ttyd_conf" <<'EOF'
 config ttyd
         option interface '@lan'
         option command '/bin/login'
@@ -995,7 +998,15 @@ config ttyd
         option port '7681'
         option login '0'
 EOF
-    echo "✅ 已更新 ttyd 配置文件"
+        echo "✅ 已更新 ttyd 配置文件"
+    fi
+
+    if [ -f "$menu_path" ]; then
+        echo "✅ ttyd 菜单文件存在"
+    else
+        echo "⚠️ ttyd 菜单文件不存在: $menu_path"
+    fi
+
     if [ ! -f "$uci_defaults_path" ]; then
         mkdir -p "$(dirname "$uci_defaults_path")"
 
@@ -1022,6 +1033,20 @@ set_default_hostname() {
     if [ -f "$CFG_PATH" ]; then
         sed -i "s/set system\.@system\[-1\]\.hostname='[^']*'/set system.@system[-1].hostname='OrionWrt'/" "$CFG_PATH"
     fi
+}
+
+set_default_password() {
+    local shadow_file="$BUILD_DIR/package/base-files/files/etc/shadow"
+    mkdir -p "$(dirname "$shadow_file")"
+    # 密码: orion, 哈希: $1$OrionWrt$Y2QQfmgxNEgwHDXMqVsR21
+    cat > "$shadow_file" <<'EOF'
+root:$1$OrionWrt$Y2QQfmgxNEgwHDXMqVsR21:19777:0:99999:7:::
+daemon:*:0:0:99999:7:::
+ftp:*:0:0:99999:7:::
+network:*:0:0:99999:7:::
+nobody:*:0:0:99999:7:::
+dnsmasq:x:0:0:99999:7:::
+EOF
 }
 
 main() {
@@ -1074,9 +1099,10 @@ main() {
     apply_hash_fixes # 调用哈希修正函数
 
 #    support_fw4_adg
-    install_mihomo_for_openclash
+    install_mihomo_for_openclash "$DEVICE_NAME"
     set_ttyd_no_password
     set_default_hostname
+    set_default_password
     replace_build_by_signature
     update_script_priority
 #    fix_easytier
