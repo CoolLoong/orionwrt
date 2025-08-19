@@ -1061,16 +1061,8 @@ set_default_hostname() {
 
 set_default_password() {
     local shadow_file="$BUILD_DIR/package/base-files/files/etc/shadow"
-    mkdir -p "$(dirname "$shadow_file")"
-    # 密码: orion, 哈希: $1$.KcASP9K$Td8zGcHE0Ufhm9tk2zM5h1
-    cat > "$shadow_file" <<'EOF'
-root:$1$.KcASP9K$Td8zGcHE0Ufhm9tk2zM5h1:19777:0:99999:7:::
-daemon:*:0:0:99999:7:::
-ftp:*:0:0:99999:7:::
-network:*:0:0:99999:7:::
-nobody:*:0:0:99999:7:::
-dnsmasq:x:0:0:99999:7:::
-EOF
+    # 密码: orion, 哈希: $1$5v833wo4$UnSjizmhFLXndjY338e2F/
+    sed -i 's/root:::0:99999:7:::/root:$1$5v833wo4$UnSjizmhFLXndjY338e2F.::0:99999:7:::/g' "$shadow_file"
 }
 
 main() {
