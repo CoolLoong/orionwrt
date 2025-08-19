@@ -90,7 +90,6 @@ remove_unwanted_packages() {
         "luci-app-passwall" "luci-app-ddns-go" "luci-app-rclone" "luci-app-ssr-plus"
         "luci-app-vssr" "luci-app-daed" "luci-app-dae" "luci-app-alist" "luci-app-homeproxy"
         "luci-app-haproxy-tcp" "luci-app-mihomo" "luci-app-appfilter" "luci-app-msd_lite"
-        "luci-base"
     )
     local packages_net=(
         "haproxy" "xray-core" "xray-plugin" "dns2socks" "alist" "hysteria"
@@ -165,7 +164,7 @@ install_small8() {
         luci-app-quickstart luci-app-istorex luci-app-cloudflarespeedtest netdata luci-app-netdata \
         lucky luci-app-lucky luci-app-openclash luci-app-homeproxy luci-app-amlogic nikki luci-app-nikki \
         tailscale luci-app-tailscale oaf open-app-filter luci-app-oaf easytier luci-app-easytier \
-        msd_lite luci-app-msd_lite cups luci-app-cupsd luci-base
+        msd_lite luci-app-msd_lite cups luci-app-cupsd
 }
 
 install_fullconenat() {
@@ -187,7 +186,7 @@ install_feeds() {
     ./scripts/feeds update -i
     for dir in $BUILD_DIR/feeds/*; do
         # 检查是否为目录并且不以 .tmp 结尾，并且不是软链接
-        if [ -d "$dir" ] && [[ ! "$dir" == *.tmp ]] && [ ! -L "$dir" ]; then
+        if [ ! -L "$dir" ] && [ -d "$dir" ] && [[ ! "$dir" == *.tmp ]]; then
             if [[ $(basename "$dir") == "small8" ]]; then
                 install_small8
                 install_fullconenat
@@ -358,6 +357,31 @@ add_ax6600_led() {
     # 设置执行权限
     chmod +x "$athena_led_dir/root/usr/sbin/athena-led"
     chmod +x "$athena_led_dir/root/etc/init.d/athena_led"
+}
+
+apply_luci_base_patch() {
+    local patch_file="$BASE_PATH/patches/luci-base.patch"
+    
+    if [ ! -f "$patch_file" ]; then
+        echo "警告: luci-base.patch 文件不存在: $patch_file"
+        return 1
+    fi
+
+    local luci_base_paths=(
+        "$BUILD_DIR/feeds/luci/modules"
+    )
+
+    for base_path in "${luci_base_paths[@]}"; do
+        if [ -d "$base_path/luci-base" ]; then
+            echo "应用 luci-base patch 到: $base_path/luci-base"
+            cd "$base_path" || exit 1
+            if ! patch -p1 < "$patch_file"; then
+                echo "错误: patch 应用失败于 $base_path/luci-base"
+                exit 1
+            fi
+            cd "$BUILD_DIR" || exit 1
+        fi
+    done
 }
 
 change_cpuusage() {
@@ -1039,9 +1063,9 @@ set_default_hostname() {
 set_default_password() {
     local shadow_file="$BUILD_DIR/package/base-files/files/etc/shadow"
     mkdir -p "$(dirname "$shadow_file")"
-    # 密码: orion, 哈希: $1$OrionWrt$Y2QQfmgxNEgwHDXMqVsR21
+    # 密码: orion, 哈希: $1$.KcASP9K$Td8zGcHE0Ufhm9tk2zM5h1
     cat > "$shadow_file" <<'EOF'
-root:$1$OrionWrt$Y2QQfmgxNEgwHDXMqVsR21:19777:0:99999:7:::
+root:$1$.KcASP9K$Td8zGcHE0Ufhm9tk2zM5h1:19777:0:99999:7:::
 daemon:*:0:0:99999:7:::
 ftp:*:0:0:99999:7:::
 network:*:0:0:99999:7:::
@@ -1097,6 +1121,7 @@ main() {
     update_uwsgi_limit_as
     update_orion
     install_feeds
+    apply_luci_base_patch
     apply_hash_fixes # 调用哈希修正函数
 
 #    support_fw4_adg
