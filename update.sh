@@ -937,6 +937,16 @@ EOF
     echo "✅ 设置自定义 banner: $banner_path"
 }
 
+set_ttyd_auto_login() {
+    local ttyd_config="$BUILD_DIR/feeds/packages/utils/ttyd/files/ttyd.config"
+    if [ -f "$ttyd_config" ]; then
+        sed -i 's|/bin/login|/bin/login -f root|g' "$ttyd_config"
+        echo "✅ 已设置 ttyd 自动登录为 root"
+    else
+        echo "⚠️ ttyd 配置文件不存在: $ttyd_config"
+    fi
+}
+
 install_mihomo_for_openclash() {
     local mihomo_ver="v1.19.12"
     local device_name="$1"
@@ -986,71 +996,12 @@ install_mihomo_for_openclash() {
     fi
 
     chmod +x "$mihomo_bin"
-    cp "$mihomo_bin" "$clash_core_dir/clash"
-    chmod +x "$clash_core_dir/clash"
+    cp "$mihomo_bin" "$clash_core_dir/clash_meta"
+    chmod +x "$clash_core_dir/clash_meta"
     echo "✅ mihomo 内核 ($target_arch) 已安装到: $clash_core_dir"
     rm -rf "$temp_dir"
 }
 
-set_ttyd_no_password() {
-    local ttyd_conf="$BUILD_DIR/feeds/packages/utils/ttyd/files/ttyd.config"
-    local uci_defaults_path="$BUILD_DIR/package/base-files/files/etc/uci-defaults/99_ttyd_config"
-    local menu_path="$BUILD_DIR/feeds/luci/applications/luci-app-ttyd/root/usr/share/luci/menu.d/luci-app-ttyd.json"
-
-    if [ ! -f "$ttyd_conf" ]; then
-        echo "⚠️ ttyd 配置文件不存在: $ttyd_conf"
-        echo "跳过 ttyd 配置"
-        return 1
-    fi
-    local ttyd_already_configured=false
-    if grep -q "option login '0'" "$ttyd_conf" && grep -q "option enable '1'" "$ttyd_conf"; then
-        echo "✅ ttyd 已经配置过免密码登录，跳过配置文件更新"
-        ttyd_already_configured=true
-    fi
-    if [ "$ttyd_already_configured" = false ]; then
-        if [ ! -f "$ttyd_conf.bak" ]; then
-            cp "$ttyd_conf" "$ttyd_conf.bak"
-            echo "已备份原配置文件: $ttyd_conf.bak"
-        fi
-        local existing_content
-        existing_content=$(cat "$ttyd_conf")
-        cat > "$ttyd_conf" <<'EOF'
-config ttyd
-        option interface '@lan'
-        option command '/bin/login'
-        option enable '1'
-        option port '7681'
-        option login '0'
-EOF
-        echo "✅ 已更新 ttyd 配置文件"
-    fi
-
-    if [ -f "$menu_path" ]; then
-        echo "✅ ttyd 菜单文件存在"
-    else
-        echo "⚠️ ttyd 菜单文件不存在: $menu_path"
-    fi
-
-    if [ ! -f "$uci_defaults_path" ]; then
-        mkdir -p "$(dirname "$uci_defaults_path")"
-
-        cat > "$uci_defaults_path" <<'EOF'
-#!/bin/sh
-uci -q delete ttyd.@ttyd[0].login
-uci set ttyd.@ttyd[0].login='0'
-uci set ttyd.@ttyd[0].enable='1'
-uci -q set ttyd.@ttyd[0].port='7681'
-uci commit ttyd
-/etc/init.d/ttyd enable
-exit 0
-EOF
-        chmod +x "$uci_defaults_path"
-        echo "✅ 已创建 ttyd uci-defaults 脚本: $uci_defaults_path"
-    else
-        echo "✅ ttyd uci-defaults 脚本已存在，跳过创建"
-    fi
-    echo "ttyd 无密码登录配置完成！"
-}
 
 set_default_hostname() {
     local CFG_PATH="$BUILD_DIR/package/base-files/files/bin/config_generate"
@@ -1117,7 +1068,7 @@ main() {
 
 #    support_fw4_adg
     install_mihomo_for_openclash "$DEVICE_NAME"
-    set_ttyd_no_password
+    set_ttyd_auto_login
     set_default_hostname
     set_default_password
     replace_build_by_signature
