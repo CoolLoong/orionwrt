@@ -312,6 +312,24 @@ apply_hash_fixes() {
         "smartdns"
 }
 
+# 应用luci-mod-status防火墙补丁
+apply_luci_firewall_patch() {
+    local patch_file="$BASE_PATH/patches/0004-luci-mod-status-firewall-disable-legacy-firewall-rul.patch"
+    local luci_dir="$BUILD_DIR/feeds/luci"
+    
+    if [ -f "$patch_file" ] && [ -d "$luci_dir" ]; then
+        cd "$luci_dir"
+        if patch -p1 --dry-run < "$patch_file" > /dev/null 2>&1; then
+            patch -p1 < "$patch_file"
+        else
+            echo "警告：luci-mod-status 防火墙补丁无法应用，可能已经应用过或版本不匹配。"
+        fi
+        cd "$BUILD_DIR"
+    else
+        echo "警告：luci-mod-status补丁文件或目标目录不存在。"
+    fi
+}
+
 update_ath11k_fw() {
     local makefile="$BUILD_DIR/package/firmware/ath11k-firmware/Makefile"
     local new_mk="$BASE_PATH/patches/ath11k_fw.mk"
@@ -1064,8 +1082,8 @@ main() {
     update_orion
     install_feeds
     apply_luci_base_patch
-    apply_hash_fixes # 调用哈希修正函数
-
+    apply_hash_fixes
+    apply_luci_firewall_patch
 #    support_fw4_adg
     install_mihomo_for_openclash "$DEVICE_NAME"
     set_ttyd_auto_login
