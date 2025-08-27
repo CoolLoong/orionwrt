@@ -19,12 +19,13 @@ REPO_BRANCH=$2
 BUILD_DIR=$3
 COMMIT_HASH=$4
 SKIP_FEEDS_UPDATE=$5
+DEVICE_NAME=$6
 
 FEEDS_CONF="feeds.conf.default"
 GOLANG_REPO="https://github.com/sbwml/packages_lang_golang"
 GOLANG_BRANCH="25.x"
 THEME_SET="orion"
-LAN_ADDR="192.168.100.1"
+LAN_ADDR="192.168.4.1"
 
 clone_repo() {
     if [[ ! -d $BUILD_DIR ]]; then
@@ -94,7 +95,7 @@ remove_unwanted_packages() {
         "haproxy" "xray-core" "xray-plugin" "dns2socks" "alist" "hysteria"
         "mosdns" "adguardhome" "ddns-go" "naiveproxy" "shadowsocks-rust"
         "sing-box" "v2ray-core" "v2ray-geodata" "v2ray-plugin" "tuic-client"
-        "chinadns-ng" "ipt2socks" "tcping" "trojan-plus" "simple-obfs" "shadowsocksr-libev" 
+        "chinadns-ng" "ipt2socks" "tcping" "trojan-plus" "simple-obfs" "shadowsocksr-libev"
         "dae" "daed" "mihomo" "geoview" "tailscale" "open-app-filter" "msd_lite"
     )
     local packages_utils=(
@@ -102,7 +103,7 @@ remove_unwanted_packages() {
     )
     local small8_packages=(
         "ppp" "firewall" "dae" "daed" "daed-next" "libnftnl" "nftables" "dnsmasq" "luci-app-alist"
-        "alist" "opkg" "smartdns" "luci-app-smartdns"
+        "alist" "opkg" "smartdns" "luci-app-smartdns" "luci-app-openclash" "openclash"
     )
 
     for pkg in "${luci_packages[@]}"; do
@@ -185,7 +186,7 @@ install_feeds() {
     ./scripts/feeds update -i
     for dir in $BUILD_DIR/feeds/*; do
         # 检查是否为目录并且不以 .tmp 结尾，并且不是软链接
-        if [ -d "$dir" ] && [[ ! "$dir" == *.tmp ]] && [ ! -L "$dir" ]; then
+        if [ ! -L "$dir" ] && [ -d "$dir" ] && [[ ! "$dir" == *.tmp ]]; then
             if [[ $(basename "$dir") == "small8" ]]; then
                 install_small8
                 install_fullconenat
@@ -203,7 +204,6 @@ fix_default_set() {
         find "$BUILD_DIR/feeds/luci/collections/" -type f -name "Makefile" -exec sed -i "s/luci-theme-bootstrap/luci-theme-$THEME_SET/g" {} \;
     fi
 
-    install -Dm755 "$BASE_PATH/patches/990_set_argon_primary" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/990_set_argon_primary"
     install -Dm755 "$BASE_PATH/patches/991_custom_settings" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/991_custom_settings"
 
     if [ -f "$BUILD_DIR/package/emortal/autocore/files/tempinfo" ]; then
@@ -312,6 +312,24 @@ apply_hash_fixes() {
         "smartdns"
 }
 
+# 应用luci-mod-status防火墙补丁
+apply_luci_firewall_patch() {
+    local patch_file="$BASE_PATH/patches/0004-luci-mod-status-firewall-disable-legacy-firewall-rul.patch"
+    local luci_dir="$BUILD_DIR/feeds/luci"
+    
+    if [ -f "$patch_file" ] && [ -d "$luci_dir" ]; then
+        cd "$luci_dir"
+        if patch -p1 --dry-run < "$patch_file" > /dev/null 2>&1; then
+            patch -p1 < "$patch_file"
+        else
+            echo "警告：luci-mod-status 防火墙补丁无法应用，可能已经应用过或版本不匹配。"
+        fi
+        cd "$BUILD_DIR"
+    else
+        echo "警告：luci-mod-status补丁文件或目标目录不存在。"
+    fi
+}
+
 update_ath11k_fw() {
     local makefile="$BUILD_DIR/package/firmware/ath11k-firmware/Makefile"
     local new_mk="$BASE_PATH/patches/ath11k_fw.mk"
@@ -356,6 +374,31 @@ add_ax6600_led() {
     # 设置执行权限
     chmod +x "$athena_led_dir/root/usr/sbin/athena-led"
     chmod +x "$athena_led_dir/root/etc/init.d/athena_led"
+}
+
+apply_luci_base_patch() {
+    local patch_file="$BASE_PATH/patches/luci-base.patch"
+    
+    if [ ! -f "$patch_file" ]; then
+        echo "警告: luci-base.patch 文件不存在: $patch_file"
+        return 1
+    fi
+
+    local luci_base_paths=(
+        "$BUILD_DIR/feeds/luci/modules"
+    )
+
+    for base_path in "${luci_base_paths[@]}"; do
+        if [ -d "$base_path/luci-base" ]; then
+            echo "应用 luci-base patch 到: $base_path/luci-base"
+            cd "$base_path" || exit 1
+            if ! patch -p1 < "$patch_file"; then
+                echo "错误: patch 应用失败于 $base_path/luci-base"
+                exit 1
+            fi
+            cd "$BUILD_DIR" || exit 1
+        fi
+    done
 }
 
 change_cpuusage() {
@@ -888,6 +931,11 @@ update_orion() {
     echo "Orion 更新完毕。"
 }
 
+replace_build_by_signature() {
+    find "$BUILD_DIR/feeds" -type f -path "*/luci-static/*" -exec sed -i 's/build by ZqinKing/build by CoolLoong/g' {} +
+    find "$BUILD_DIR/package" -type f -path "*/luci-static/*" -exec sed -i 's/build by ZqinKing/build by CoolLoong/g' {} +
+}
+
 set_custom_banner() {
     local banner_path="$BUILD_DIR/package/base-files/files/etc/banner"
     mkdir -p "$(dirname "$banner_path")"
@@ -907,34 +955,41 @@ EOF
     echo "✅ 设置自定义 banner: $banner_path"
 }
 
+set_ttyd_auto_login() {
+    local ttyd_config="$BUILD_DIR/feeds/packages/utils/ttyd/files/ttyd.config"
+    if [ -f "$ttyd_config" ]; then
+        sed -i 's|/bin/login|/bin/login -f root|g' "$ttyd_config"
+        echo "✅ 已设置 ttyd 自动登录为 root"
+    else
+        echo "⚠️ ttyd 配置文件不存在: $ttyd_config"
+    fi
+}
+
 install_mihomo_for_openclash() {
     local mihomo_ver="v1.19.12"
-    local arch="linux-amd64-v3"
-    local mihomo_url="https://github.com/MetaCubeX/mihomo/releases/download/${mihomo_ver}/mihomo-${arch}-${mihomo_ver}.gz"
+    local device_name="$1"
+
+    local target_arch=""
+    if [[ $device_name =~ ^x64.* ]]; then
+        target_arch="linux-amd64-v3"
+    elif [[ $device_name =~ ^x86.* ]]; then
+        target_arch="linux-386"
+    elif [[ $device_name =~ ^(ax6000|ax3600|r4a|r619ac|ax1800|ax6|redmiax6s|qualcomm|ipq|filogic).* ]]; then
+        target_arch="linux-arm64"
+    elif [[ $device_name =~ ^(armv7|armv6|arm).* ]]; then
+        target_arch="linux-armv7"
+    else
+        target_arch="linux-arm64"
+        echo "⚠️ 未能识别设备架构 ($device_name)，默认使用 linux-arm64"
+    fi
+
+    local mihomo_url="https://github.com/MetaCubeX/mihomo/releases/download/${mihomo_ver}/mihomo-${target_arch}-${mihomo_ver}.gz"
     local temp_dir=$(mktemp -d)
     local mihomo_gz="$temp_dir/mihomo.gz"
     local mihomo_bin="$temp_dir/mihomo"
-    local openclash_dirs=(
-        "$BUILD_DIR/package/luci-app-openclash"
-        "$BUILD_DIR/feeds/small8/luci-app-openclash"
-    )
-    local openclash_found=false
-    local clash_core_dir=""
-    for dir in "${openclash_dirs[@]}"; do
-        if [ -d "$dir" ]; then
-            clash_core_dir="$dir/root/etc/openclash/core"
-            openclash_found=true
-            echo "找到 OpenClash 目录: $dir"
-            break
-        fi
-    done
-    if [ "$openclash_found" = false ]; then
-        echo "⚠️ OpenClash 目录不存在，跳过 mihomo 下载"
-        rm -rf "$temp_dir"
-        return 1
-    fi
+    local clash_core_dir="$BUILD_DIR/package/feeds/luci/luci-app-openclash/root/etc/openclash/core"
     mkdir -p "$clash_core_dir"
-    echo "正在下载 mihomo ($arch): $mihomo_url"
+    echo "正在下载 mihomo ($target_arch): $mihomo_url"
     if command -v wget >/dev/null 2>&1; then
         wget --tries=3 --timeout=30 --progress=bar -O "$mihomo_gz" "$mihomo_url"
     elif command -v curl >/dev/null 2>&1; then
@@ -944,79 +999,39 @@ install_mihomo_for_openclash() {
         rm -rf "$temp_dir"
         return 1
     fi
+
     if [ $? -ne 0 ] || [ ! -s "$mihomo_gz" ]; then
         echo "❌ 下载失败！请检查网络或链接: $mihomo_url"
         rm -rf "$temp_dir"
         return 1
     fi
+
     gunzip -c "$mihomo_gz" > "$mihomo_bin"
     if [ $? -ne 0 ] || [ ! -f "$mihomo_bin" ]; then
         echo "❌ 解压失败！"
         rm -rf "$temp_dir"
         return 1
     fi
+
     chmod +x "$mihomo_bin"
-    cp "$mihomo_bin" "$clash_core_dir/mihomo"
-    chmod +x "$clash_core_dir/mihomo"
-    ln -sf mihomo "$clash_core_dir/clash_meta"
-    echo "✅ mihomo 内核已安装到: $clash_core_dir"
+    cp "$mihomo_bin" "$clash_core_dir/clash_meta"
+    chmod +x "$clash_core_dir/clash_meta"
+    echo "✅ mihomo 内核 ($target_arch) 已安装到: $clash_core_dir"
     rm -rf "$temp_dir"
 }
 
-set_ttyd_no_password() {
-    local ttyd_conf="$BUILD_DIR/feeds/packages/utils/ttyd/files/ttyd.config"
-    local uci_defaults_path="$BUILD_DIR/package/base-files/files/etc/uci-defaults/99_ttyd_config"
-    if [ ! -f "$ttyd_conf" ]; then
-        echo "⚠️ ttyd 配置文件不存在: $ttyd_conf"
-        echo "跳过 ttyd 配置"
-        return 1
-    fi
-    echo "找到 ttyd 配置文件: $ttyd_conf"
-    if grep -q "option login '0'" "$ttyd_conf" && grep -q "option enable '1'" "$ttyd_conf"; then
-        echo "✅ ttyd 已经配置过免密码登录，跳过重复配置"
-        return 0
-    fi
-    if [ ! -f "$ttyd_conf.bak" ]; then
-        cp "$ttyd_conf" "$ttyd_conf.bak"
-        echo "已备份原配置文件: $ttyd_conf.bak"
-    fi
-    local existing_content
-    existing_content=$(cat "$ttyd_conf")
-    cat > "$ttyd_conf" <<'EOF'
-config ttyd
-        option interface '@lan'
-        option command '/bin/login'
-        option enable '1'
-        option port '7681'
-        option login '0'
-EOF
-    echo "✅ 已更新 ttyd 配置文件"
-    if [ ! -f "$uci_defaults_path" ]; then
-        mkdir -p "$(dirname "$uci_defaults_path")"
-
-        cat > "$uci_defaults_path" <<'EOF'
-#!/bin/sh
-uci -q delete ttyd.@ttyd[0].login
-uci set ttyd.@ttyd[0].login='0'
-uci set ttyd.@ttyd[0].enable='1'
-uci -q set ttyd.@ttyd[0].port='7681'
-uci commit ttyd
-/etc/init.d/ttyd enable
-exit 0
-EOF
-        chmod +x "$uci_defaults_path"
-        echo "✅ 已创建 ttyd uci-defaults 脚本: $uci_defaults_path"
-    else
-        echo "✅ ttyd uci-defaults 脚本已存在，跳过创建"
-    fi
-    echo "ttyd 无密码登录配置完成！"
-}
 
 set_default_hostname() {
     local CFG_PATH="$BUILD_DIR/package/base-files/files/bin/config_generate"
     if [ -f "$CFG_PATH" ]; then
         sed -i "s/set system\.@system\[-1\]\.hostname='[^']*'/set system.@system[-1].hostname='OrionWrt'/" "$CFG_PATH"
     fi
+}
+
+set_default_password() {
+    local shadow_file="$BUILD_DIR/package/base-files/files/etc/shadow"
+    # 密码: orion, 哈希: $1$zlz39mv2$a5xr3n0/qEre789LKYJ6J0
+    sed -i 's#root:::0:99999:7:::#root:$1$zlz39mv2$a5xr3n0/qEre789LKYJ6J0::0:99999:7:::#g' "$shadow_file"
 }
 
 main() {
@@ -1066,12 +1081,15 @@ main() {
     update_uwsgi_limit_as
     update_orion
     install_feeds
-    apply_hash_fixes # 调用哈希修正函数
-
+    apply_luci_base_patch
+    apply_hash_fixes
+    apply_luci_firewall_patch
 #    support_fw4_adg
-    install_mihomo_for_openclash
-    set_ttyd_no_password
+    install_mihomo_for_openclash "$DEVICE_NAME"
+    set_ttyd_auto_login
     set_default_hostname
+    set_default_password
+    replace_build_by_signature
     update_script_priority
 #    fix_easytier
 #    update_geoip
