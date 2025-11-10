@@ -1,0 +1,49 @@
+# Auto detect text files and perform LF normalization
+* text=auto eol=lf
+
+# Shell scripts must use LF
+*.sh text eol=lf
+
+# Configuration files
+*.config text eol=lf
+*.ini text eol=lf
+*.conf text eol=lf
+
+# Patch files must use LF
+*.patch text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+
+# YAML files
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Makefiles must use LF
+Makefile text eol=lf
+*.mk text eol=lf
+
+# Source code
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+
+# Web files
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.gz binary
+*.tar binary
+*.zip binary
+*.bin binary
+*.elf binary

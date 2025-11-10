@@ -1,0 +1,17 @@
+--- a/package/network/services/ppp/Makefile
++++ b/package/network/services/ppp/Makefile
+@@ -31,11 +31,11 @@
+
+ include $(INCLUDE_DIR)/package.mk
+ CONFIGURE_VARS += \
+-	enable_eaptls=no \
+-	enable_microsoft_extensions=yes \
+-	enable_peap=no
++	enable_microsoft_extensions=yes
+
+ CONFIGURE_ARGS += \
++	--disable-eaptls \
++	--disable-peap \
+ 	with_openssl=no \
+ 	with_pam=no \
+ 	with_pcap=no \
