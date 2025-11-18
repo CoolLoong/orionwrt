@@ -20,7 +20,7 @@ FEEDS_CONF="feeds.conf.default"
 GOLANG_REPO="https://github.com/sbwml/packages_lang_golang"
 GOLANG_BRANCH="25.x"
 THEME_SET="orion"
-LAN_ADDR="192.168.4.1"
+LAN_ADDR="192.168.100.1"
 
 # ==================== 帮助信息 ====================
 show_usage() {
