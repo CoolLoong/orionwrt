@@ -38,19 +38,19 @@ show_usage() {
     -h, --help           显示此帮助信息
 
 构建模式:
-    【模式1 - 首次构建】
+    模式1 - 首次构建
         自动检测并执行完整初始化流程
         - 下载源代码
         - 更新 feeds
         - 应用所有自定义配置
 
-    【模式2 - 增量构建（默认）】
+    模式2 - 增量构建（默认
         不更新 feeds，但应用所有自定义配置
         - 保持 feeds 源代码不变
         - 重新应用自定义修改
         - 编译速度快
 
-    【模式3 - 增量构建 + 更新 feeds】
+    模式3 - 增量构建 + 更新 feeds
         使用 --update-feeds 选项
         - 更新 feeds 源代码
         - 重新应用自定义配置
@@ -247,9 +247,21 @@ clean_up() {
 reset_feeds_conf() {
     cd $BUILD_PATH
     echo "重置代码到最新版本..."
-    git reset --hard origin/$REPO_BRANCH
-    git clean -f -d
-    git pull
+
+    # 检查 REPO_BRANCH 是否是 tag（以 v 开头或包含点号版本号）
+    if [[ $REPO_BRANCH =~ ^v[0-9]+\. ]] || git rev-parse "refs/tags/$REPO_BRANCH" >/dev/null 2>&1; then
+        echo "检测到 tag: $REPO_BRANCH"
+        git fetch --tags
+        git reset --hard
+        git clean -f -d
+        git checkout "tags/$REPO_BRANCH"
+    else
+        echo "检测到分支: $REPO_BRANCH"
+        git reset --hard origin/$REPO_BRANCH
+        git clean -f -d
+        git pull
+    fi
+
     if [[ $COMMIT_HASH != "none" ]]; then
         echo "切换到指定提交: $COMMIT_HASH"
         git checkout $COMMIT_HASH
@@ -289,43 +301,74 @@ remove_unwanted_packages() {
     cd $BUILD_PATH
     echo "移除不需要的包..."
 
-    local luci_packages=(
-        "luci-app-passwall" "luci-app-ddns-go" "luci-app-rclone" "luci-app-ssr-plus"
-        "luci-app-vssr" "luci-app-daed" "luci-app-dae" "luci-app-alist" "luci-app-homeproxy"
-        "luci-app-haproxy-tcp" "luci-app-mihomo" "luci-app-appfilter" "luci-app-msd_lite"
-    )
-    local packages_net=(
-        "haproxy" "xray-core" "xray-plugin" "dns2socks" "alist" "hysteria"
-        "mosdns" "adguardhome" "ddns-go" "naiveproxy" "sing-box" "v2ray-core" "v2ray-geodata" "v2ray-plugin" "tuic-client"
-        "chinadns-ng" "ipt2socks" "tcping" "trojan-plus" "simple-obfs" "shadowsocksr-libev"
-        "dae" "daed" "mihomo" "geoview" "tailscale" "open-app-filter" "msd_lite"
-    )
-    local packages_utils=("cups")
-    local small8_packages=(
-        "ppp" "firewall" "dae" "daed" "daed-next" "libnftnl" "nftables" "dnsmasq"
-        "luci-app-alist" "alist" "opkg" "smartdns" "luci-app-smartdns"
-        "luci-app-openclash" "openclash"
+    # 从官方源删除，使用 small8 版本（代理/科学上网相关）
+    local use_small8_from_luci=(
+        "luci-app-passwall" "luci-app-ssr-plus" "luci-app-vssr"
+        "luci-app-homeproxy" "luci-app-daed" "luci-app-dae"
     )
 
-    for pkg in "${luci_packages[@]}"; do
+    local use_small8_from_packages_net=(
+        "xray-core" "xray-plugin" "v2ray-core" "v2ray-geodata" "v2ray-plugin"
+        "hysteria" "naiveproxy" "sing-box" "tuic-client"
+        "dns2socks" "chinadns-ng" "ipt2socks" "tcping" "trojan-plus"
+        "simple-obfs" "shadowsocksr-libev" "haproxy"
+        "mosdns" "adguardhome" "ddns-go"
+        "dae" "daed" "mihomo" "geoview" "tailscale"
+    )
+
+    # 从官方源删除，不需要的包（完全不用）
+    local unwanted_from_luci=(
+        "luci-app-rclone" "luci-app-haproxy-tcp" "luci-app-mihomo"
+        "luci-app-appfilter" "luci-app-msd_lite" "luci-app-alist"
+    )
+
+    local unwanted_from_packages=(
+        "cups"           # packages/utils/cups
+        "alist"          # packages/net/alist
+        "open-app-filter" "msd_lite"  # packages/net/
+    )
+
+    # 从 small8 删除，使用官方源版本（核心系统包）
+    local use_official_remove_from_small8=(
+        "ppp" "firewall" "libnftnl" "nftables" "dnsmasq" "opkg"
+        "smartdns" "luci-app-smartdns"
+        "dae" "daed" "daed-next"  # 与上面重复，优先官方源
+    )
+
+    # ============================================================
+    # 执行删除操作
+    # ============================================================
+
+    echo "  -> 从官方 luci 源删除，改用 small8 版本..."
+    for pkg in "${use_small8_from_luci[@]}"; do
         [[ -d ./feeds/luci/applications/$pkg ]] && rm -rf ./feeds/luci/applications/$pkg
-        [[ -d ./feeds/luci/themes/$pkg ]] && rm -rf ./feeds/luci/themes/$pkg
     done
 
-    for pkg in "${packages_net[@]}"; do
+    echo "  -> 从官方 packages 源删除，改用 small8 版本..."
+    for pkg in "${use_small8_from_packages_net[@]}"; do
         [[ -d ./feeds/packages/net/$pkg ]] && rm -rf ./feeds/packages/net/$pkg
     done
 
-    for pkg in "${packages_utils[@]}"; do
+    echo "  -> 删除不需要的包（luci）..."
+    for pkg in "${unwanted_from_luci[@]}"; do
+        [[ -d ./feeds/luci/applications/$pkg ]] && rm -rf ./feeds/luci/applications/$pkg
+    done
+
+    echo "  -> 删除不需要的包（packages）..."
+    for pkg in "${unwanted_from_packages[@]}"; do
+        [[ -d ./feeds/packages/net/$pkg ]] && rm -rf ./feeds/packages/net/$pkg
         [[ -d ./feeds/packages/utils/$pkg ]] && rm -rf ./feeds/packages/utils/$pkg
     done
 
-    for pkg in "${small8_packages[@]}"; do
+    echo "  -> 从 small8 删除，使用官方源版本..."
+    for pkg in "${use_official_remove_from_small8[@]}"; do
         [[ -d ./feeds/small8/$pkg ]] && rm -rf ./feeds/small8/$pkg
     done
 
+    # 删除 istore（如果存在）
     [[ -d ./package/istore ]] && rm -rf ./package/istore
 
+    # 清理 qualcommax 设备的默认配置
     if [ -d "target/linux/qualcommax/base-files/etc/uci-defaults" ]; then
         find "target/linux/qualcommax/base-files/etc/uci-defaults/" -type f -name "99*.sh" -exec rm -f {} +
     fi
@@ -343,17 +386,80 @@ update_golang() {
     fi
 }
 
+fix_rust_ci_llvm() {
+    cd $BUILD_PATH
+    local rust_makefile="feeds/packages/lang/rust/Makefile"
+
+    if [[ -f "$rust_makefile" ]]; then
+        # 幂等性检查：只在包含 download-ci-llvm=true 时才修改
+        if grep -q "llvm.download-ci-llvm=true" "$rust_makefile"; then
+            echo "修复 Rust CI LLVM 下载问题..."
+            # 禁用 CI LLVM 下载，改为从源码编译（更可靠但稍慢）
+            sed -i 's/--set=llvm.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/g' "$rust_makefile"
+            echo "  -> 已禁用 CI LLVM 下载，将从源码编译 LLVM"
+            echo "✅ Rust CI LLVM 修复完成"
+        fi
+    fi
+}
+
 install_small8() {
     cd $BUILD_PATH
-    ./scripts/feeds install -p small8 -f xray-core xray-plugin dns2tcp dns2socks haproxy hysteria \
-        naiveproxy sing-box v2ray-core v2ray-geodata v2ray-geoview v2ray-plugin \
-        tuic-client chinadns-ng ipt2socks tcping trojan-plus simple-obfs shadowsocksr-libev \
-        luci-app-passwall v2dat mosdns luci-app-mosdns adguardhome luci-app-adguardhome ddns-go \
-        luci-app-ddns-go taskd luci-lib-xterm luci-lib-taskd luci-app-store quickstart \
-        luci-app-quickstart luci-app-istorex luci-app-cloudflarespeedtest netdata luci-app-netdata \
-        lucky luci-app-lucky luci-app-openclash luci-app-homeproxy luci-app-amlogic nikki luci-app-nikki \
-        tailscale luci-app-tailscale oaf open-app-filter luci-app-oaf easytier luci-app-easytier \
-        msd_lite luci-app-msd_lite cups luci-app-cupsd
+    echo "  -> 从 small8 安装软件包..."
+
+    # 代理核心和工具
+    local proxy_packages=(
+        xray-core xray-plugin v2ray-core v2ray-geodata v2ray-geoview v2ray-plugin
+        dns2tcp dns2socks hysteria naiveproxy sing-box tuic-client
+        chinadns-ng ipt2socks tcping trojan-plus simple-obfs shadowsocksr-libev
+        haproxy v2dat
+    )
+
+    # 代理 LuCI 应用
+    local proxy_luci_apps=(
+        luci-app-passwall
+        luci-app-openclash
+        luci-app-homeproxy
+    )
+
+    # DNS 和网络工具
+    local network_tools=(
+        mosdns luci-app-mosdns
+        adguardhome luci-app-adguardhome
+        ddns-go luci-app-ddns-go
+        tailscale luci-app-tailscale
+        easytier luci-app-easytier
+    )
+
+    # 应用过滤
+    local filter_apps=(
+        oaf open-app-filter luci-app-oaf
+    )
+
+    # 系统应用
+    local system_apps=(
+        taskd luci-lib-xterm luci-lib-taskd
+        luci-app-store quickstart luci-app-quickstart luci-app-istorex
+        luci-app-cloudflarespeedtest
+        netdata luci-app-netdata
+        lucky luci-app-lucky
+        nikki luci-app-nikki
+        luci-app-amlogic
+        msd_lite luci-app-msd_lite
+        cups luci-app-cupsd
+        vlmcsd luci-app-vlmcsd
+    )
+
+    # 合并所有包列表
+    local all_packages=(
+        "${proxy_packages[@]}"
+        "${proxy_luci_apps[@]}"
+        "${network_tools[@]}"
+        "${filter_apps[@]}"
+        "${system_apps[@]}"
+    )
+
+    # 使用 -f (force) 从 small8 安装，覆盖可能的冲突
+    ./scripts/feeds install -p small8 -f "${all_packages[@]}"
 }
 
 install_fullconenat() {
@@ -369,17 +475,33 @@ install_fullconenat() {
 install_feeds() {
     cd $BUILD_PATH
     echo "安装 feeds..."
+
+    # ============================================================
+    # Feeds 安装策略：
+    # 1. 官方源（packages, luci, routing, telephony）：安装所有包
+    # 2. small8 源：只安装白名单中的包（避免安装不需要的包）
+    # ============================================================
+
+    # 更新 feeds 索引
     ./scripts/feeds update -i
+
+    # 遍历所有 feeds 目录
     for dir in feeds/*; do
+        # 跳过符号链接、非目录、临时目录
         if [ ! -L "$dir" ] && [ -d "$dir" ] && [[ ! "$dir" == *.tmp ]]; then
-            if [[ $(basename "$dir") == "small8" ]]; then
+            local feed_name=$(basename "$dir")
+
+            if [[ "$feed_name" == "small8" ]]; then
+                echo "  -> 处理 small8 源（白名单安装）..."
                 install_small8
                 install_fullconenat
             else
-                ./scripts/feeds install -f -ap $(basename "$dir")
+                echo "  -> 处理官方源: $feed_name（安装所有包）..."
+                ./scripts/feeds install -f -ap "$feed_name"
             fi
         fi
     done
+
     echo "✅ Feeds 安装完成"
 }
 
@@ -485,19 +607,45 @@ install_opkg_distfeeds() {
     cd $BUILD_PATH
     local distfeeds_conf="package/emortal/default-settings/files/99-distfeeds.conf"
     if [ -d "$(dirname "$distfeeds_conf")" ] && [ ! -f "$distfeeds_conf" ]; then
-        cat > "$distfeeds_conf" <<'EOF'
-src/gz openwrt_base https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/aarch64_cortex-a53/base/
-src/gz openwrt_luci https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/aarch64_cortex-a53/luci/
-src/gz openwrt_packages https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/aarch64_cortex-a53/packages/
-src/gz openwrt_routing https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/aarch64_cortex-a53/routing/
-src/gz openwrt_telephony https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/aarch64_cortex-a53/telephony/
+        # 根据设备名检测架构
+        local target_arch=""
+        local device_name="$1"
+
+        if [[ $device_name =~ ^x86_64.* ]]; then
+            target_arch="x86_64"
+        elif [[ $device_name =~ ^x86.* ]]; then
+            target_arch="i386_pentium4"
+        elif [[ $device_name =~ ^(ax6000|ax3600|r4a|r619ac|ax1800|ax6|redmiax6s|qualcomm|ipq).* ]]; then
+            target_arch="aarch64_cortex-a53"
+        elif [[ $device_name =~ ^filogic.* ]]; then
+            target_arch="aarch64_cortex-a53"
+        else
+            # 默认使用 aarch64，兼容大多数 ARM64 设备
+            target_arch="aarch64_cortex-a53"
+        fi
+
+        echo "添加软件源架构: ($target_arch)"
+
+        cat > "$distfeeds_conf" <<EOF
+src/gz openwrt_base https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/${target_arch}/base/
+src/gz openwrt_luci https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/${target_arch}/luci/
+src/gz openwrt_packages https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/${target_arch}/packages/
+src/gz openwrt_routing https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/${target_arch}/routing/
+src/gz openwrt_telephony https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/packages/${target_arch}/telephony/
 EOF
-        sed -i "/define Package\/default-settings\/install/a\\
+        # 幂等性检查：只在 Makefile 中不存在时才添加
+        if ! grep -q "99-distfeeds.conf" package/emortal/default-settings/Makefile; then
+            sed -i "/define Package\/default-settings\/install/a\\
 \\t\$(INSTALL_DIR) \$(1)/etc\\n\
 \t\$(INSTALL_DATA) ./files/99-distfeeds.conf \$(1)/etc/99-distfeeds.conf\n" package/emortal/default-settings/Makefile
-        sed -i "/exit 0/i\\
+        fi
+
+        # 幂等性检查：只在 99-default-settings 中不存在时才添加
+        if ! grep -q "99-distfeeds.conf" package/emortal/default-settings/files/99-default-settings; then
+            sed -i "/exit 0/i\\
 [ -f \'/etc/99-distfeeds.conf\' ] && mv \'/etc/99-distfeeds.conf\' \'/etc/opkg/distfeeds.conf\'\n\
 sed -ri \'/check_signature/s@^[^#]@#&@\' /etc/opkg.conf\n" package/emortal/default-settings/files/99-default-settings
+        fi
     fi
 }
 
@@ -693,7 +841,7 @@ apply_custom_configs() {
 
     echo ">>> 系统增强"
     update_uwsgi_limit_as               # 提高LuCI内存限制
-    install_opkg_distfeeds              # 添加官方软件源
+    install_opkg_distfeeds "$Dev"       # 添加官方软件源
     add_backup_info_to_sysupgrade       # 系统升级备份配置
     update_script_priority              # 优化服务启动顺序
     update_dnsmasq_conf                 # dnsmasq配置优化
@@ -720,6 +868,7 @@ run_full_initialization() {
 
     echo ">>> 2: 编译环境配置"
     update_golang
+    fix_rust_ci_llvm
     change_dnsmasq2full
     fix_mk_def_depends
 
@@ -742,10 +891,12 @@ run_incremental_build() {
         echo ">>> 更新 feeds 源代码"
         update_feeds
         clone_luci_theme_orion
+        fix_rust_ci_llvm
         install_feeds
         apply_custom_configs
     else
         echo ">>> 保持 feeds 源代码不变，应用自定义配置"
+        fix_rust_ci_llvm
         apply_custom_configs
     fi
     echo "✅ 增量构建准备完成"
